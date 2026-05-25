@@ -105,10 +105,10 @@ class RetroOnlineApp(App):
                 pass
 
         if not self.username:
-            self.switch_screen("auth")
+            self.push_screen("auth")
         else:
             asyncio.create_task(self.client.connect())
-            self.switch_screen("main_menu")
+            self.push_screen("main_menu")
 
     def on_state_update(self, users):
         # Notify the active screen if it cares about user updates
