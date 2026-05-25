@@ -1,2 +1,15 @@
+[project]
+name = "retro-online"
+version = "1.0.0"
+description = "Backend MVP for Retro Online R36S"
+requires-python = ">=3.9"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "sqlalchemy",
+    "websockets",
+    "pydantic"
+]
+
 [tool.vercel]
 entrypoint = "server.main:app"
