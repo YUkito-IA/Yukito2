@@ -1,7 +1,12 @@
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.orm import sessionmaker, declarative_base
+import os
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./retro_online.db"
+# Use /tmp directory if running on Vercel, otherwise local directory
+if os.environ.get("VERCEL"):
+    SQLALCHEMY_DATABASE_URL = "sqlite:////tmp/retro_online.db"
+else:
+    SQLALCHEMY_DATABASE_URL = "sqlite:///./retro_online.db"
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}

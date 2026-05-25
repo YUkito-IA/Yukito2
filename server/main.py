@@ -6,10 +6,13 @@ import json
 from fastapi.responses import FileResponse
 import os
 from .database.models import get_db, Pack, init_db
+from .database.seed import seed_test_pack
 from sqlalchemy.orm import Session
 from fastapi import Depends, HTTPException
 
 init_db()
+if os.environ.get("VERCEL"):
+    seed_test_pack()
 
 app = FastAPI(title="Retro Online", description="Backend MVP for Retro Online R36S", version="1.0.0")
 
