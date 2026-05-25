@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.db
+client/roms/
+client/cores/
+client/downloads/
+server/packs_storage/
+server_output.log
+venv/
+env/
+.env

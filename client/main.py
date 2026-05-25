@@ -1,0 +1,164 @@
+import asyncio
+import websockets
+import json
+import sys
+from .sync.manager import SyncManager
+from .launcher.retroarch import RetroArchLauncher
+
+class RetroClient:
+    def __init__(self, username, server_host="localhost", server_port=8000):
+        self.username = username
+        self.server_http = f"http://{server_host}:{server_port}"
+        self.server_ws = f"ws://{server_host}:{server_port}/ws/{username}"
+        self.websocket = None
+        self.is_connected = False
+        self.sync_manager = SyncManager(backend_url=self.server_http)
+        self.launcher = RetroArchLauncher()
+
+    async def connect(self):
+        try:
+            self.websocket = await websockets.connect(self.server_ws)
+            self.is_connected = True
+            print(f"Connected to Retro Online as {self.username}")
+            # Start listening task
+            asyncio.create_task(self.listen())
+        except Exception as e:
+            print(f"Failed to connect: {e}")
+
+    async def listen(self):
+        try:
+            while self.is_connected:
+                message = await self.websocket.recv()
+                data = json.loads(message)
+                self.handle_message(data)
+        except websockets.exceptions.ConnectionClosed:
+            print("Connection to server closed.")
+            self.is_connected = False
+
+    def handle_message(self, data):
+        msg_type = data.get("type")
+        if msg_type == "states":
+            print("\n--- Users Online ---")
+            for user in data.get("data", []):
+                game_info = f" playing {user.get('game')}" if user.get('game') else ""
+                room_info = f" in room {user.get('room_id')}" if user.get('room_id') else ""
+                print(f"● {user['username']} - {user['status']}{game_info}{room_info}")
+            print("--------------------\n")
+            print("> ", end="", flush=True)
+        elif msg_type == "room_created":
+            print(f"\nRoom created successfully: {data.get('room_id')}")
+            print("> ", end="", flush=True)
+        elif msg_type == "room_joined":
+            print(f"\nJoined room successfully: {data.get('room_id')}")
+            print("> ", end="", flush=True)
+
+    async def update_status(self, status, game=None):
+        if self.is_connected:
+            msg = {"action": "update_status", "status": status, "game": game}
+            await self.websocket.send(json.dumps(msg))
+
+    async def create_room(self, room_id, game):
+        if self.is_connected:
+            msg = {"action": "create_room", "room_id": room_id, "game": game}
+            await self.websocket.send(json.dumps(msg))
+
+    async def join_room(self, room_id):
+        if self.is_connected:
+            msg = {"action": "join_room", "room_id": room_id}
+            await self.websocket.send(json.dumps(msg))
+
+    async def disconnect(self):
+        if self.websocket:
+            await self.websocket.close()
+            self.is_connected = False
+
+async def main():
+    if len(sys.argv) > 1:
+        username = sys.argv[1]
+    else:
+        username = input("Enter username: ")
+
+    client = RetroClient(username)
+    await client.connect()
+
+    # Simple interactive CLI
+    while client.is_connected:
+        try:
+            # Using asyncio.to_thread to not block the event loop with input()
+            cmd = await asyncio.to_thread(input, "> ")
+            parts = cmd.strip().split(" ")
+            command = parts[0].lower()
+
+            if command == "quit":
+                await client.disconnect()
+                break
+            elif command == "status":
+                status = " ".join(parts[1:]) if len(parts) > 1 else "Online"
+                await client.update_status(status)
+            elif command == "play":
+                game = " ".join(parts[1:]) if len(parts) > 1 else "Unknown Game"
+                await client.update_status("En partida", game)
+            elif command == "create":
+                if len(parts) > 2:
+                    room_id = parts[1]
+                    game = " ".join(parts[2:])
+                    await client.create_room(room_id, game)
+                else:
+                    print("Usage: create <room_id> <game>")
+            elif command == "join":
+                if len(parts) > 1:
+                    room_id = parts[1]
+                    await client.join_room(room_id)
+                else:
+                    print("Usage: join <room_id>")
+            elif command == "packs":
+                packs = await asyncio.to_thread(client.sync_manager.fetch_packs)
+                if not packs:
+                    print("No packs found.")
+                for p in packs:
+                    print(f"[{p['id']}] {p['game']} ({p['system']})")
+            elif command == "sync":
+                if len(parts) > 1:
+                    pack_id = int(parts[1])
+                    packs = await asyncio.to_thread(client.sync_manager.fetch_packs)
+                    pack = next((p for p in packs if p['id'] == pack_id), None)
+                    if pack:
+                        await asyncio.to_thread(client.sync_manager.sync_pack, pack['id'], pack['rom_filename'], pack['core_filename'])
+                    else:
+                        print(f"Pack {pack_id} not found.")
+                else:
+                    print("Usage: sync <pack_id>")
+            elif command == "launch":
+                if len(parts) > 1:
+                    pack_id = int(parts[1])
+                    is_host = "--host" in parts
+                    connect_ip = None
+                    for i, p in enumerate(parts):
+                        if p == "--connect" and i + 1 < len(parts):
+                            connect_ip = parts[i+1]
+
+                    packs = await asyncio.to_thread(client.sync_manager.fetch_packs)
+                    pack = next((p for p in packs if p['id'] == pack_id), None)
+                    if pack:
+                        rom_path = f"client/roms/{pack['rom_filename']}"
+                        core_path = f"client/cores/{pack['core_filename']}"
+                        client.launcher.launch(core_path, rom_path, is_host=is_host, connect_ip=connect_ip)
+                    else:
+                        print("Pack not found.")
+                else:
+                    print("Usage: launch <pack_id> [--host | --connect <ip>]")
+            else:
+                if command != "":
+                    print("Commands: status <text>, play <game>, create <room_id> <game>, join <room_id>, packs, sync <pack_id>, launch <pack_id>, quit")
+        except KeyboardInterrupt:
+            await client.disconnect()
+            break
+        except EOFError:
+            await client.disconnect()
+            break
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
