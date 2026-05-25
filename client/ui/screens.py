@@ -37,6 +37,9 @@ class MainMenuScreen(BaseRetroScreen):
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option.prompt == "Cerrar Sesión":
+            import os
+            if os.path.exists("client/configs/session.json"):
+                os.remove("client/configs/session.json")
             self.app.exit()
         elif event.option.prompt == "Sala General":
             self.app.push_screen("sala_general")
@@ -251,7 +254,7 @@ class PlaceholderScreen(BaseRetroScreen):
         if event.key == "escape" or event.key == "b" or event.key == "enter":
             self.app.pop_screen()
 
-from textual.widgets import Input, Button
+from textual.widgets import Input, Button, Checkbox
 
 class AuthScreen(BaseRetroScreen):
     # Disable "Atrás" on AuthScreen
@@ -265,6 +268,7 @@ class AuthScreen(BaseRetroScreen):
         yield Input(placeholder="Contraseña", id="password_input", password=True)
         # Only visible in register mode
         yield Input(placeholder="Confirmar Contraseña", id="password_confirm", password=True)
+        yield Checkbox("Mantener sesión iniciada", id="keep_logged_in")
         yield Label("", id="auth_message", classes="error_text")
 
         yield Horizontal(
@@ -287,12 +291,14 @@ class AuthScreen(BaseRetroScreen):
                 self.mode = "register"
                 self.query_one("#auth_mode").update("Crear Cuenta Nueva")
                 self.query_one("#password_confirm").display = True
+                self.query_one("#keep_logged_in").display = False
                 event.button.label = "Volver a Iniciar Sesión"
                 self.query_one("#btn_login").label = "Registrar"
             else:
                 self.mode = "login"
                 self.query_one("#auth_mode").update("Iniciar Sesión")
                 self.query_one("#password_confirm").display = False
+                self.query_one("#keep_logged_in").display = True
                 event.button.label = "Crear Cuenta Nueva"
                 self.query_one("#btn_login").label = "Entrar"
             msg_label.update("")
@@ -310,9 +316,18 @@ class AuthScreen(BaseRetroScreen):
                 msg_label.update("Conectando...")
                 success, msg = await asyncio.to_thread(self.app.client.login, username, password)
                 if success:
+                    # Check if keep logged in
+                    if self.query_one("#keep_logged_in").value:
+                        import json
+                        import os
+                        os.makedirs("client/configs", exist_ok=True)
+                        with open("client/configs/session.json", "w") as f:
+                            json.dump({"username": username}, f)
+
                     # Proceed to mount websockets and switch to main menu
+                    self.app.username = username
                     await self.app.client.connect()
-                    self.app.push_screen("main_menu")
+                    self.app.switch_screen("main_menu")
                 else:
                     msg_label.update(msg)
             else:

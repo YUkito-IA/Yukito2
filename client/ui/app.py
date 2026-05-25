@@ -89,13 +89,26 @@ class RetroOnlineApp(App):
         self.client.on_message = self.on_message
 
     def on_mount(self) -> None:
-        # If no username is provided at startup, push auth screen.
-        # Otherwise, attempt to connect directly (for CLI compatibility if needed)
+        import os
+        import json
+        session_file = "client/configs/session.json"
+
+        # Check if session exists and no username was forced via argv
+        if not self.username and os.path.exists(session_file):
+            try:
+                with open(session_file, "r") as f:
+                    data = json.load(f)
+                    if "username" in data:
+                        self.username = data["username"]
+                        self.client.username = self.username
+            except Exception:
+                pass
+
         if not self.username:
-            self.push_screen("auth")
+            self.switch_screen("auth")
         else:
             asyncio.create_task(self.client.connect())
-            self.push_screen("main_menu")
+            self.switch_screen("main_menu")
 
     def on_state_update(self, users):
         # Notify the active screen if it cares about user updates
