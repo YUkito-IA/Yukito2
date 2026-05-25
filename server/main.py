@@ -11,8 +11,8 @@ from sqlalchemy.orm import Session
 from fastapi import Depends, HTTPException
 
 init_db()
-if os.environ.get("VERCEL"):
-    seed_test_pack()
+# Always seed test pack on startup (seed logic is idempotent)
+seed_test_pack()
 
 app = FastAPI(title="Retro Online", description="Backend MVP for Retro Online R36S", version="1.0.0")
 
