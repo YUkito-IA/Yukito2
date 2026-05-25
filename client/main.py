@@ -6,7 +6,7 @@ from .sync.manager import SyncManager
 from .launcher.retroarch import RetroArchLauncher
 
 class RetroClient:
-    def __init__(self, username, server_url="https://yukito2.vercel.app"):
+    def __init__(self, username, server_url="https://yukito2-production.up.railway.app"):
         self.username = username
 
         # Determine HTTP and WS URLs based on provided base URL
