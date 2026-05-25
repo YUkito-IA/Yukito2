@@ -30,15 +30,16 @@ class RetroClient:
         try:
             self.websocket = await websockets.connect(self.server_ws)
             self.is_connected = True
-            print(f"Connected to Retro Online as {self.username}")
+            print(f"Connected to Retro Online WebSockets as {self.username}")
             # Start listening task
             asyncio.create_task(self.listen())
         except Exception as e:
-            print(f"Failed to connect: {e}")
+            print(f"WebSocket connection failed ({e}). Social features (rooms/status) won't work.")
+            print(f"However, HTTP features (packs, sync, launch) are still available via {self.server_http}.")
 
     async def listen(self):
         try:
-            while self.is_connected:
+            while self.is_connected and self.websocket:
                 message = await self.websocket.recv()
                 data = json.loads(message)
                 self.handle_message(data)
@@ -90,38 +91,54 @@ async def main():
         username = input("Enter username: ")
 
     client = RetroClient(username)
+    # Attempt to connect to WebSockets, but don't exit if it fails
     await client.connect()
 
     # Simple interactive CLI
-    while client.is_connected:
+    while True:
         try:
             # Using asyncio.to_thread to not block the event loop with input()
             cmd = await asyncio.to_thread(input, "> ")
             parts = cmd.strip().split(" ")
+
+            if not parts or not parts[0]:
+                continue
             command = parts[0].lower()
 
             if command == "quit":
                 await client.disconnect()
                 break
             elif command == "status":
-                status = " ".join(parts[1:]) if len(parts) > 1 else "Online"
-                await client.update_status(status)
+                if client.is_connected:
+                    status = " ".join(parts[1:]) if len(parts) > 1 else "Online"
+                    await client.update_status(status)
+                else:
+                    print("Error: WebSocket is not connected.")
             elif command == "play":
-                game = " ".join(parts[1:]) if len(parts) > 1 else "Unknown Game"
-                await client.update_status("En partida", game)
+                if client.is_connected:
+                    game = " ".join(parts[1:]) if len(parts) > 1 else "Unknown Game"
+                    await client.update_status("En partida", game)
+                else:
+                    print("Error: WebSocket is not connected.")
             elif command == "create":
-                if len(parts) > 2:
-                    room_id = parts[1]
-                    game = " ".join(parts[2:])
-                    await client.create_room(room_id, game)
+                if client.is_connected:
+                    if len(parts) > 2:
+                        room_id = parts[1]
+                        game = " ".join(parts[2:])
+                        await client.create_room(room_id, game)
+                    else:
+                        print("Usage: create <room_id> <game>")
                 else:
-                    print("Usage: create <room_id> <game>")
+                    print("Error: WebSocket is not connected.")
             elif command == "join":
-                if len(parts) > 1:
-                    room_id = parts[1]
-                    await client.join_room(room_id)
+                if client.is_connected:
+                    if len(parts) > 1:
+                        room_id = parts[1]
+                        await client.join_room(room_id)
+                    else:
+                        print("Usage: join <room_id>")
                 else:
-                    print("Usage: join <room_id>")
+                    print("Error: WebSocket is not connected.")
             elif command == "packs":
                 packs = await asyncio.to_thread(client.sync_manager.fetch_packs)
                 if not packs:
