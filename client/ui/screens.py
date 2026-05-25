@@ -7,7 +7,7 @@ class BaseRetroScreen(Screen):
     def compose(self) -> ComposeResult:
         title = getattr(self, "TITLE", "RETRO ONLINE")
         yield Label(title, classes="header_title")
-        yield self.get_content()
+        yield from self.get_content()
         yield Footer()
 
     def get_content(self):
