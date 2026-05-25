@@ -63,20 +63,48 @@ class RetroClient:
         elif msg_type == "room_joined":
             print(f"\nJoined room successfully: {data.get('room_id')}")
             print("> ", end="", flush=True)
+        elif msg_type == "system" or msg_type == "error":
+            print(f"\n[{msg_type.upper()}] {data.get('message')}")
+            print("> ", end="", flush=True)
+        elif msg_type == "game_start":
+            print(f"\n[SYSTEM] All players ready! Starting game...")
+            pack_id = data.get("pack_id")
+            host = data.get("host")
+            is_host = (self.username == host)
+            connect_ip = "127.0.0.1" if not is_host else None # In a real scenario, use actual IP of the host
+            # Use create_task to avoid blocking the listen() event loop
+            asyncio.create_task(self._auto_launch_async(pack_id, is_host, connect_ip))
+            print("> ", end="", flush=True)
+
+    async def _auto_launch_async(self, pack_id, is_host, connect_ip):
+        packs = await asyncio.to_thread(self.sync_manager.fetch_packs)
+        pack = next((p for p in packs if p['id'] == pack_id), None)
+        if pack:
+            rom_path = f"client/roms/{pack['rom_filename']}"
+            core_path = f"client/cores/{pack['core_filename']}"
+            self.launcher.launch(core_path, rom_path, is_host=is_host, connect_ip=connect_ip)
+        else:
+            print("\nFailed to auto-launch: Pack not found.")
+            print("> ", end="", flush=True)
 
     async def update_status(self, status, game=None):
         if self.is_connected:
             msg = {"action": "update_status", "status": status, "game": game}
             await self.websocket.send(json.dumps(msg))
 
-    async def create_room(self, room_id, game):
+    async def create_room(self, room_id, pack_id):
         if self.is_connected:
-            msg = {"action": "create_room", "room_id": room_id, "game": game}
+            msg = {"action": "create_room", "room_id": room_id, "pack_id": pack_id}
             await self.websocket.send(json.dumps(msg))
 
     async def join_room(self, room_id):
         if self.is_connected:
             msg = {"action": "join_room", "room_id": room_id}
+            await self.websocket.send(json.dumps(msg))
+
+    async def set_ready(self):
+        if self.is_connected:
+            msg = {"action": "ready"}
             await self.websocket.send(json.dumps(msg))
 
     async def disconnect(self):
@@ -124,10 +152,10 @@ async def main():
                 if client.is_connected:
                     if len(parts) > 2:
                         room_id = parts[1]
-                        game = " ".join(parts[2:])
-                        await client.create_room(room_id, game)
+                        pack_id = parts[2]
+                        await client.create_room(room_id, pack_id)
                     else:
-                        print("Usage: create <room_id> <game>")
+                        print("Usage: create <room_id> <pack_id>")
                 else:
                     print("Error: WebSocket is not connected.")
             elif command == "join":
@@ -137,6 +165,11 @@ async def main():
                         await client.join_room(room_id)
                     else:
                         print("Usage: join <room_id>")
+                else:
+                    print("Error: WebSocket is not connected.")
+            elif command == "ready":
+                if client.is_connected:
+                    await client.set_ready()
                 else:
                     print("Error: WebSocket is not connected.")
             elif command == "packs":

@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 import json
 from fastapi.responses import FileResponse
 import os
-from .database.models import get_db, Pack, init_db
+from .database.models import get_db, Pack, init_db, SessionLocal
 from .database.seed import seed_test_pack
 from sqlalchemy.orm import Session
 from fastapi import Depends, HTTPException
@@ -31,22 +31,39 @@ class ConnectionManager:
         # Simple rooms: mapping room_id to dictionary of room data
         self.rooms: Dict[str, dict] = {}
 
+    def get_pack_by_id(self, pack_id: int):
+        with SessionLocal() as db:
+            return db.query(Pack).filter(Pack.id == pack_id).first()
+
     async def connect(self, websocket: WebSocket, username: str):
         await websocket.accept()
         self.active_connections[websocket] = username
         self.user_states[username] = UserState(username=username, status="Online")
         await self.broadcast_states()
 
-    def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket):
         username = self.active_connections.get(websocket)
         if username:
             del self.active_connections[websocket]
-            if username in self.user_states:
+
+            state = self.user_states.get(username)
+            if state:
+                room_id = state.room_id
+                if room_id and room_id in self.rooms:
+                    room = self.rooms[room_id]
+                    if username in room["players"]:
+                        del room["players"][username]
+                        # Clean up room if empty
+                        if not room["players"]:
+                            del self.rooms[room_id]
+                        else:
+                            # If host left, maybe reassign or abandon, but for MVP just clean player
+                            pass
                 del self.user_states[username]
-            # Optionally remove from rooms if needed
 
     async def broadcast(self, message: str):
-        for connection in self.active_connections.keys():
+        # Iterate over a list copy to prevent RuntimeError if dictionary changes during await
+        for connection in list(self.active_connections.keys()):
             try:
                 await connection.send_text(message)
             except Exception:
@@ -110,31 +127,73 @@ async def websocket_endpoint(websocket: WebSocket, username: str):
 
                 elif action == "create_room":
                     room_id = msg.get("room_id")
-                    game = msg.get("game")
-                    if room_id:
-                        manager.rooms[room_id] = {
-                            "host": username,
-                            "game": game,
-                            "players": [username],
-                            "status": "Waiting"
-                        }
-                        manager.user_states[username].room_id = room_id
-                        await websocket.send_text(json.dumps({"type": "room_created", "room_id": room_id}))
-                        await manager.broadcast_states()
+                    pack_id = msg.get("pack_id")
+                    if room_id and pack_id:
+                        try:
+                            pack_id_int = int(pack_id)
+                        except ValueError:
+                            await websocket.send_text(json.dumps({"type": "error", "message": "Invalid pack_id"}))
+                            continue
+
+                        pack = manager.get_pack_by_id(pack_id_int)
+                        if pack:
+                            manager.rooms[room_id] = {
+                                "host": username,
+                                "game": pack.game,
+                                "pack_id": pack.id,
+                                "max_players": pack.max_players,
+                                "players": {username: {"ready": False}},
+                                "status": "Waiting"
+                            }
+                            manager.user_states[username].room_id = room_id
+                            await websocket.send_text(json.dumps({"type": "room_created", "room_id": room_id}))
+                            await manager.broadcast_states()
+                        else:
+                            await websocket.send_text(json.dumps({"type": "error", "message": "Pack not found"}))
 
                 elif action == "join_room":
                     room_id = msg.get("room_id")
                     if room_id in manager.rooms:
-                        manager.rooms[room_id]["players"].append(username)
-                        manager.user_states[username].room_id = room_id
-                        await websocket.send_text(json.dumps({"type": "room_joined", "room_id": room_id}))
-                        await manager.broadcast_states()
+                        room = manager.rooms[room_id]
+                        if len(room["players"]) < room["max_players"]:
+                            room["players"][username] = {"ready": False}
+                            manager.user_states[username].room_id = room_id
+                            await websocket.send_text(json.dumps({"type": "room_joined", "room_id": room_id}))
+                            await manager.broadcast_states()
+                        else:
+                            await websocket.send_text(json.dumps({"type": "error", "message": "Room is full"}))
+                    else:
+                        await websocket.send_text(json.dumps({"type": "error", "message": "Room not found"}))
+
+                elif action == "ready":
+                    room_id = manager.user_states.get(username, UserState(username=username, status="")).room_id
+                    if room_id and room_id in manager.rooms:
+                        room = manager.rooms[room_id]
+                        if username in room["players"]:
+                            room["players"][username]["ready"] = True
+                            await websocket.send_text(json.dumps({"type": "system", "message": "You are marked as READY"}))
+
+                            # Check if everyone is ready
+                            all_ready = all(p_data["ready"] for p_data in room["players"].values())
+                            if all_ready and len(room["players"]) > 1: # Require at least 2 players to auto-start for MVP
+                                room["status"] = "Playing"
+                                # Broadcast game start to everyone in the room
+                                start_msg = json.dumps({
+                                    "type": "game_start",
+                                    "room_id": room_id,
+                                    "pack_id": room["pack_id"],
+                                    "host": room["host"]
+                                })
+                                # Iterate over a list copy to prevent RuntimeError
+                                for ws, un in list(manager.active_connections.items()):
+                                    if un in room["players"]:
+                                        await ws.send_text(start_msg)
 
             except json.JSONDecodeError:
                 pass
 
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        await manager.disconnect(websocket)
         await manager.broadcast_states()
 
 if __name__ == "__main__":
