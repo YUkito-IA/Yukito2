@@ -6,10 +6,21 @@ from .sync.manager import SyncManager
 from .launcher.retroarch import RetroArchLauncher
 
 class RetroClient:
-    def __init__(self, username, server_host="localhost", server_port=8000):
+    def __init__(self, username, server_url="https://yukito2.vercel.app"):
         self.username = username
-        self.server_http = f"http://{server_host}:{server_port}"
-        self.server_ws = f"ws://{server_host}:{server_port}/ws/{username}"
+
+        # Determine HTTP and WS URLs based on provided base URL
+        self.server_http = server_url.rstrip("/")
+        if self.server_http.startswith("https://"):
+            ws_base = self.server_http.replace("https://", "wss://")
+        elif self.server_http.startswith("http://"):
+            ws_base = self.server_http.replace("http://", "ws://")
+        else:
+            # Fallback if no scheme provided
+            self.server_http = f"http://{server_url}"
+            ws_base = f"ws://{server_url}"
+
+        self.server_ws = f"{ws_base}/ws/{username}"
         self.websocket = None
         self.is_connected = False
         self.sync_manager = SyncManager(backend_url=self.server_http)
