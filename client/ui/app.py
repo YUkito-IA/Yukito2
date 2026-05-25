@@ -2,13 +2,29 @@ from textual.app import App
 import asyncio
 
 from client.main import RetroClient
-from client.ui.screens import MainMenuScreen, SalaGeneralScreen, SincronizarPacksScreen, KeyboardScreen, RoomLobbyScreen, CreateRoomScreen, PlaceholderScreen
+from client.ui.screens import MainMenuScreen, SalaGeneralScreen, SincronizarPacksScreen, KeyboardScreen, RoomLobbyScreen, CreateRoomScreen, PlaceholderScreen, AuthScreen
 
 class RetroOnlineApp(App):
     CSS = """
     Screen {
         background: black;
         color: white;
+    }
+    .error_text {
+        color: red;
+        text-align: center;
+        width: 100%;
+        margin: 1 0;
+    }
+    .button_row {
+        height: 3;
+        align: center middle;
+    }
+    Input {
+        background: #111;
+        color: white;
+        border: solid green;
+        margin: 1 2;
     }
     .header_title {
         content-align: center middle;
@@ -54,6 +70,7 @@ class RetroOnlineApp(App):
     """
 
     SCREENS = {
+        "auth": AuthScreen,
         "main_menu": MainMenuScreen,
         "sala_general": SalaGeneralScreen,
         "sincronizar_packs": SincronizarPacksScreen,
@@ -63,7 +80,7 @@ class RetroOnlineApp(App):
         "placeholder": PlaceholderScreen
     }
 
-    def __init__(self, username: str):
+    def __init__(self, username: str = ""):
         super().__init__()
         self.username = username
         self.client = RetroClient(username)
@@ -72,9 +89,13 @@ class RetroOnlineApp(App):
         self.client.on_message = self.on_message
 
     def on_mount(self) -> None:
-        # Start connection in background
-        asyncio.create_task(self.client.connect())
-        self.push_screen(MainMenuScreen())
+        # If no username is provided at startup, push auth screen.
+        # Otherwise, attempt to connect directly (for CLI compatibility if needed)
+        if not self.username:
+            self.push_screen("auth")
+        else:
+            asyncio.create_task(self.client.connect())
+            self.push_screen("main_menu")
 
     def on_state_update(self, users):
         # Notify the active screen if it cares about user updates

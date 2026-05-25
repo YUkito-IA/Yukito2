@@ -5,10 +5,12 @@ from typing import Dict, List, Optional
 import json
 from fastapi.responses import FileResponse
 import os
-from .database.models import get_db, Pack, init_db, SessionLocal
+from .database.models import get_db, Pack, User, init_db, SessionLocal
 from .database.seed import seed_test_pack
 from sqlalchemy.orm import Session
 from fastapi import Depends, HTTPException
+from pydantic import BaseModel
+import hashlib
 
 init_db()
 # Always seed test pack on startup (seed logic is idempotent)
@@ -83,6 +85,37 @@ def read_root():
 def list_packs(db: Session = Depends(get_db)):
     packs = db.query(Pack).all()
     return packs
+
+class UserAuth(BaseModel):
+    username: str
+    password: str
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+@app.post("/auth/register")
+def register(user_data: UserAuth, db: Session = Depends(get_db)):
+    if not user_data.username or not user_data.password:
+        raise HTTPException(status_code=400, detail="Username and password are required")
+
+    existing_user = db.query(User).filter(User.username == user_data.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already exists")
+
+    new_user = User(
+        username=user_data.username,
+        password_hash=hash_password(user_data.password)
+    )
+    db.add(new_user)
+    db.commit()
+    return {"message": "User created successfully"}
+
+@app.post("/auth/login")
+def login(user_data: UserAuth, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == user_data.username).first()
+    if not user or user.password_hash != hash_password(user_data.password):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return {"message": "Login successful"}
 
 @app.get("/packs/download/{pack_id}/{file_type}")
 def download_pack_file(pack_id: int, file_type: str, db: Session = Depends(get_db)):

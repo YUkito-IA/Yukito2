@@ -4,6 +4,8 @@ from textual.screen import Screen
 from textual.containers import Vertical, Horizontal
 
 class BaseRetroScreen(Screen):
+    BINDINGS = [("escape", "go_back", "Atrás")]
+
     def compose(self) -> ComposeResult:
         title = getattr(self, "TITLE", "RETRO ONLINE")
         yield Label(title, classes="header_title")
@@ -12,6 +14,10 @@ class BaseRetroScreen(Screen):
 
     def get_content(self):
         yield Vertical()
+
+    def action_go_back(self) -> None:
+        if len(self.app.screen_stack) > 1:
+            self.app.pop_screen()
 
 class MainMenuScreen(BaseRetroScreen):
     TITLE = "RETRO ONLINE"
@@ -169,9 +175,7 @@ class KeyboardScreen(BaseRetroScreen):
         display_text = self.current_input if len(self.current_input) > 0 else " "
         input_label.update(display_text)
 
-    def on_key(self, event):
-        if event.key == "escape" or event.key == "b":
-            self.app.pop_screen()
+    # Key bindings are now managed globally via BaseRetroScreen.BINDINGS
 
 class RoomLobbyScreen(BaseRetroScreen):
     TITLE = "SALA DE ESPERA"
@@ -246,3 +250,81 @@ class PlaceholderScreen(BaseRetroScreen):
     def on_key(self, event):
         if event.key == "escape" or event.key == "b" or event.key == "enter":
             self.app.pop_screen()
+
+from textual.widgets import Input, Button
+
+class AuthScreen(BaseRetroScreen):
+    # Disable "Atrás" on AuthScreen
+    BINDINGS = []
+    TITLE = "RETRO ONLINE - LOGIN"
+
+    def compose(self) -> ComposeResult:
+        yield Label(self.TITLE, classes="header_title")
+        yield Label("Iniciar Sesión", id="auth_mode")
+        yield Input(placeholder="Usuario", id="username_input")
+        yield Input(placeholder="Contraseña", id="password_input", password=True)
+        # Only visible in register mode
+        yield Input(placeholder="Confirmar Contraseña", id="password_confirm", password=True)
+        yield Label("", id="auth_message", classes="error_text")
+
+        yield Horizontal(
+            Button("Entrar", id="btn_login", variant="success"),
+            Button("Crear Cuenta Nueva", id="btn_switch_mode", variant="primary"),
+            classes="button_row"
+        )
+        yield Footer()
+
+    def on_mount(self):
+        self.mode = "login"
+        self.query_one("#password_confirm").display = False
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        button_id = event.button.id
+        msg_label = self.query_one("#auth_message")
+
+        if button_id == "btn_switch_mode":
+            if self.mode == "login":
+                self.mode = "register"
+                self.query_one("#auth_mode").update("Crear Cuenta Nueva")
+                self.query_one("#password_confirm").display = True
+                event.button.label = "Volver a Iniciar Sesión"
+                self.query_one("#btn_login").label = "Registrar"
+            else:
+                self.mode = "login"
+                self.query_one("#auth_mode").update("Iniciar Sesión")
+                self.query_one("#password_confirm").display = False
+                event.button.label = "Crear Cuenta Nueva"
+                self.query_one("#btn_login").label = "Entrar"
+            msg_label.update("")
+
+        elif button_id == "btn_login":
+            username = self.query_one("#username_input").value
+            password = self.query_one("#password_input").value
+
+            if not username or not password:
+                msg_label.update("Usuario y contraseña requeridos.")
+                return
+
+            import asyncio
+            if self.mode == "login":
+                msg_label.update("Conectando...")
+                success, msg = await asyncio.to_thread(self.app.client.login, username, password)
+                if success:
+                    # Proceed to mount websockets and switch to main menu
+                    await self.app.client.connect()
+                    self.app.push_screen("main_menu")
+                else:
+                    msg_label.update(msg)
+            else:
+                confirm = self.query_one("#password_confirm").value
+                if password != confirm:
+                    msg_label.update("Las contraseñas no coinciden.")
+                    return
+                msg_label.update("Registrando...")
+                success, msg = await asyncio.to_thread(self.app.client.register, username, password)
+                if success:
+                    msg_label.update("Cuenta creada. Inicia sesión.")
+                    # Automatically switch back to login mode
+                    self.query_one("#btn_switch_mode").press()
+                else:
+                    msg_label.update(msg)

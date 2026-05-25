@@ -6,7 +6,7 @@ from .sync.manager import SyncManager
 from .launcher.retroarch import RetroArchLauncher
 
 class RetroClient:
-    def __init__(self, username, server_url="https://yukito2-production.up.railway.app"):
+    def __init__(self, username="", server_url="https://yukito2-production.up.railway.app"):
         self.username = username
 
         # Determine HTTP and WS URLs based on provided base URL
@@ -33,7 +33,51 @@ class RetroClient:
         # Keep track of local states
         self.users_online = []
 
+    def login(self, username, password):
+        import urllib.request
+        import json
+        url = f"{self.server_http}/auth/login"
+        data = json.dumps({"username": username, "password": password}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'}, method='POST')
+        try:
+            with urllib.request.urlopen(req) as response:
+                self.username = username
+                self.server_ws = f"{self.server_http.replace('http', 'ws')}/ws/{username}"
+                return True, "Login successful"
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                return False, "Invalid username or password"
+            return False, f"Server error: {e.code}"
+        except Exception as e:
+            return False, str(e)
+
+    def register(self, username, password):
+        import urllib.request
+        import json
+        url = f"{self.server_http}/auth/register"
+        data = json.dumps({"username": username, "password": password}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'}, method='POST')
+        try:
+            with urllib.request.urlopen(req) as response:
+                return True, "Account created successfully"
+        except urllib.error.HTTPError as e:
+            if e.code == 400:
+                return False, "Username already exists"
+            return False, f"Server error: {e.code}"
+        except Exception as e:
+            return False, str(e)
+
     async def connect(self):
+        if not self.username:
+            print("Cannot connect without a valid username.")
+            return
+
+        # Ensure correct WS URL if username was updated after init
+        if "://" in self.server_http:
+            scheme = "wss" if self.server_http.startswith("https") else "ws"
+            host = self.server_http.split("://")[1]
+            self.server_ws = f"{scheme}://{host}/ws/{self.username}"
+
         try:
             self.websocket = await websockets.connect(self.server_ws)
             self.is_connected = True
