@@ -7,11 +7,9 @@ class RetroArchLauncher:
 
     def launch(self, core_path, rom_path, is_host=False, connect_ip=None):
         if not os.path.exists(core_path):
-            print(f"Error: Core not found at {core_path}")
             return False
 
         if not os.path.exists(rom_path):
-            print(f"Error: ROM not found at {rom_path}")
             return False
 
         command = [
@@ -25,13 +23,10 @@ class RetroArchLauncher:
         elif connect_ip:
             command.extend(["--connect", connect_ip])
 
-        print(f"Launching RetroArch with command: {' '.join(command)}")
         try:
             # Execute the actual process. We use Popen so it runs in background
-            # and doesn't block the client CLI completely.
-            subprocess.Popen(command)
-            print("RetroArch launched successfully.")
+            # and doesn't block the client completely.
+            subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
         except Exception as e:
-            print(f"Failed to launch RetroArch: {e}")
             return False

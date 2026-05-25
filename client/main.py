@@ -26,6 +26,13 @@ class RetroClient:
         self.sync_manager = SyncManager(backend_url=self.server_http)
         self.launcher = RetroArchLauncher()
 
+        # Callbacks for UI updates
+        self.on_state_update = None
+        self.on_message = None
+
+        # Keep track of local states
+        self.users_online = []
+
     async def connect(self):
         try:
             self.websocket = await websockets.connect(self.server_ws)
@@ -50,30 +57,40 @@ class RetroClient:
     def handle_message(self, data):
         msg_type = data.get("type")
         if msg_type == "states":
-            print("\n--- Users Online ---")
-            for user in data.get("data", []):
-                game_info = f" playing {user.get('game')}" if user.get('game') else ""
-                room_info = f" in room {user.get('room_id')}" if user.get('room_id') else ""
-                print(f"● {user['username']} - {user['status']}{game_info}{room_info}")
-            print("--------------------\n")
-            print("> ", end="", flush=True)
+            self.users_online = data.get("data", [])
+            if self.on_state_update:
+                self.on_state_update(self.users_online)
+
+            # CLI fallback
+            if not self.on_state_update:
+                print("\n--- Users Online ---")
+                for user in self.users_online:
+                    game_info = f" playing {user.get('game')}" if user.get('game') else ""
+                    room_info = f" in room {user.get('room_id')}" if user.get('room_id') else ""
+                    print(f"● {user['username']} - {user['status']}{game_info}{room_info}")
+                print("--------------------\n")
+                print("> ", end="", flush=True)
+
         elif msg_type == "room_created":
-            print(f"\nRoom created successfully: {data.get('room_id')}")
-            print("> ", end="", flush=True)
+            self._notify(f"Room created successfully: {data.get('room_id')}")
         elif msg_type == "room_joined":
-            print(f"\nJoined room successfully: {data.get('room_id')}")
-            print("> ", end="", flush=True)
+            self._notify(f"Joined room successfully: {data.get('room_id')}")
         elif msg_type == "system" or msg_type == "error":
-            print(f"\n[{msg_type.upper()}] {data.get('message')}")
-            print("> ", end="", flush=True)
+            self._notify(f"[{msg_type.upper()}] {data.get('message')}")
         elif msg_type == "game_start":
-            print(f"\n[SYSTEM] All players ready! Starting game...")
+            self._notify(f"[SYSTEM] All players ready! Starting game...")
             pack_id = data.get("pack_id")
             host = data.get("host")
             is_host = (self.username == host)
             connect_ip = "127.0.0.1" if not is_host else None # In a real scenario, use actual IP of the host
             # Use create_task to avoid blocking the listen() event loop
             asyncio.create_task(self._auto_launch_async(pack_id, is_host, connect_ip))
+
+    def _notify(self, message):
+        if self.on_message:
+            self.on_message(message)
+        else:
+            print(f"\n{message}")
             print("> ", end="", flush=True)
 
     async def _auto_launch_async(self, pack_id, is_host, connect_ip):
@@ -84,8 +101,7 @@ class RetroClient:
             core_path = f"client/cores/{pack['core_filename']}"
             self.launcher.launch(core_path, rom_path, is_host=is_host, connect_ip=connect_ip)
         else:
-            print("\nFailed to auto-launch: Pack not found.")
-            print("> ", end="", flush=True)
+            self._notify("Failed to auto-launch: Pack not found.")
 
     async def update_status(self, status, game=None):
         if self.is_connected:
