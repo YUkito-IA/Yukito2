@@ -22,6 +22,10 @@ class BaseRetroScreen(Screen):
 class MainMenuScreen(BaseRetroScreen):
     TITLE = "RETRO ONLINE"
 
+    def action_go_back(self) -> None:
+        # Override to prevent popping the main menu into a black screen
+        pass
+
     def get_content(self):
         yield OptionList(
             "Sala General",
@@ -257,9 +261,11 @@ class PlaceholderScreen(BaseRetroScreen):
 from textual.widgets import Input, Button, Checkbox
 
 class AuthScreen(BaseRetroScreen):
-    # Disable "Atrás" on AuthScreen
-    BINDINGS = []
     TITLE = "RETRO ONLINE - LOGIN"
+
+    def action_go_back(self) -> None:
+        # Override to prevent popping the auth screen into a black screen
+        pass
 
     def compose(self) -> ComposeResult:
         yield Label(self.TITLE, classes="header_title")
